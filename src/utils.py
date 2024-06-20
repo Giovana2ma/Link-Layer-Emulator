@@ -1,8 +1,8 @@
+
 SYNC = 0xDCC023C2
+
 HEADER_SIZE = 15
-
 HEADER_FORMAT = '!I I H H H B'
-
 
 def checksum(data):
         """
