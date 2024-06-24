@@ -6,6 +6,7 @@ class Socket:
         self.host = host
         self.port = port
         self.socket = self.create_socket()
+        self.connect()
 
     def determine_ip_type(self,hostname):
         ip_address = socket.getaddrinfo(hostname, None)[0][4][0]
@@ -33,13 +34,16 @@ class Socket:
     def connect(self):
         self.socket.connect((self.host, self.port))
     
-    def send(self,packet):
+    def send(self,packet,n_bytes = 4096):
         try:
             self.socket.sendto(packet, (self.host, self.port))
+            return self.receive(n_bytes)
+
         except socket.error as e: 
             print ("Socket error: %s" %str(e)) 
         except Exception as e: 
-            print ("Other exception: %s" %str(e)) 
+            print ("Other exception: %s" %str(e))
+        
 
     def receive(self,n_bytes = 4096):
         try:

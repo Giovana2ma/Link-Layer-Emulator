@@ -7,9 +7,11 @@ class NetworkInterface:
         self.host = host
         self.port = port
         self.id = 0
-        self.socket_ = Socket(host,port)
+        self.socket = Socket(host,port)
+
+        self.last_received_frame = None
     
-    def create_dccnet_frame(self,data,id=None,flags=0):
+    def create_dccnet_frame(self,data,flags=0):
         """
         Create a DCCNET frame with the given data, frame ID, and flags.
         
@@ -29,17 +31,15 @@ class NetworkInterface:
         # The packet format depends on data
         format_string = f"{HEADER_FORMAT} {str(length) + 's'}"
 
-        if(id == None):
-            id = self.id
 
         # Create header without checksum
-        frame = struct.pack(format_string, SYNC, SYNC, 0, length, id, flags,data_encoded)
+        frame = struct.pack(format_string, SYNC, SYNC, 0, length, self.id, flags,data_encoded)
         
         # Calculate checksum with checksum field set to 0
         cs = checksum(frame)
         
         # Create the full frame with the correct checksum
-        frame = struct.pack(format_string, SYNC, SYNC, cs, length, id, flags, data_encoded)
+        frame = struct.pack(format_string, SYNC, SYNC, cs, length, self.id, flags, data_encoded)
         
         return frame
     
@@ -50,3 +50,40 @@ class NetworkInterface:
         _,_,cs,length,id,flags = struct.unpack(HEADER_FORMAT,header)
 
         return cs,length,id,flags,data
+
+    
+    def is_acceptable(self,frame):
+        # A frame can only be accepted if 
+        # (1) it is an acknowledgement frame for the last transmitted frame;
+        # (2) a data frame with an identifier (ID) different from that of the last received frame;
+        # (3) a retransmission of the last received frame;
+        # (4) or a reset frame.
+        _,_,id,flag,_ = self.unpack_dccnet_frame(frame)
+
+        if((flag == ACK) and (id == self.id)):
+            return True
+        
+        if((flag == RST) and id == RST_ID):
+            return True
+        
+        if((flag != ACK) and id != self.id):
+            return True
+        
+        if(self.last_received_frame == frame):
+            return True
+
+        return False
+    
+    def transmit(self,data,flags=0):
+        frame = self.create_dccnet_frame(data,flags)
+        n=16
+
+        while(n>0):
+            recv = self.socket.send(frame)
+
+            if(self.is_acceptable(recv)): break
+            n -= 1
+        return recv
+
+
+

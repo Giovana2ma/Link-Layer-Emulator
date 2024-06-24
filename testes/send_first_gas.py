@@ -5,15 +5,14 @@ from client import *
 args = sys.argv
 host,port,gas = args[1:]
 c = Client(host,int(port))
-frame = c.create_dccnet_frame(gas)
-c.socket_.connect()
-c.socket_.send(frame)
-header = c.socket_.receive(HEADER_SIZE)
+
+c.transmit(gas)
+header = c.socket.receive(HEADER_SIZE)
 length = struct.unpack(HEADER_FORMAT,header)[3]
 print(c.unpack_dccnet_frame(header))
 
-# _,_,cs,length,id,flags = struct.unpack(HEADER_FORMAT,header)
-# msg = c.socket_.receive(length)
-# print(header)
+_,_,cs,length,id,flags = struct.unpack(HEADER_FORMAT,header)
+# msg = c.socket.receive(length)
+print(flags)
 # print(length)
 # print(msg)

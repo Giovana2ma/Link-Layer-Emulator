@@ -1,0 +1,18 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["rubick.snes.2advanced.dev",
+                     "51564",
+                    "2021032218:0:0204619483f99b081bbba5d01e7cb80dce7d39ac23ce64ad02e1e673ca61b536+2021031947:0:e5a885d7cc9da6e78be0e82a37b6f40571bbf9faa3cce9e04f9fca0b4466c5fa+df398b17654b4e45ed59a609593793e3eaf4b7ded365a0162b366617dc981297"]
+        }
+    ]
+}
