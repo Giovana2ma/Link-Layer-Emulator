@@ -12,6 +12,8 @@ END = 0x40
 RST = 0x20 
 
 RST_ID          = 0xFFFF
+
+
 def checksum(data):
         """
         Calculate the Internet checksum of the given data.

@@ -43,47 +43,65 @@ class NetworkInterface:
         
         return frame
     
-    def unpack_dccnet_frame(self,response):
-        header  = response[:HEADER_SIZE]
-        data    = response[HEADER_SIZE:]
-
-        _,_,cs,length,id,flags = struct.unpack(HEADER_FORMAT,header)
-
-        return cs,length,id,flags,data
-
-    
-    def is_acceptable(self,frame):
-        # A frame can only be accepted if 
-        # (1) it is an acknowledgement frame for the last transmitted frame;
-        # (2) a data frame with an identifier (ID) different from that of the last received frame;
-        # (3) a retransmission of the last received frame;
-        # (4) or a reset frame.
-        _,_,id,flag,_ = self.unpack_dccnet_frame(frame)
-
-        if((flag == ACK) and (id == self.id)):
-            return True
-        
-        if((flag == RST) and id == RST_ID):
-            return True
-        
-        if((flag != ACK) and id != self.id):
-            return True
-        
-        if(self.last_received_frame == frame):
-            return True
-
-        return False
-    
     def transmit(self,data,flags=0):
         frame = self.create_dccnet_frame(data,flags)
-        n=16
 
+        n=16
         while(n>0):
             recv = self.socket.send(frame)
 
             if(self.is_acceptable(recv)): break
             n -= 1
         return recv
+    
+    def must_send_ack(self,response):
+        #Upon accepting a data frame (cases 2 and), the receiver must respond with an acknowledgement frame.
+        # (2) a data frame with an identifier (ID) different from that of the last received frame;
+        # (3) a retransmission of the last received frame;
 
+        _,_,id,flag,_ = self.unpack_dccnet_frame(response)
+        if(not self.is_acceptable(response)): return False
+        if(flag == ACK): return False
+        if(flag == RST): return False
+        return True
+    
+    def send_ack(self,response):
+        if(not self.must_send_ack(response)): return None
+        self.transmit("",flags=ACK)
 
+    @staticmethod
+    def unpack_dccnet_frame(response):
+        header  = response[:HEADER_SIZE]
+        data    = response[HEADER_SIZE:]
 
+        _,_,cs,length,id,flags = struct.unpack(HEADER_FORMAT,header)
+
+        return cs,length,id,flags,data
+    
+
+    @staticmethod
+    def is_acceptable(frame):
+        # A frame can only be accepted if (Checksum IS VALID)
+        # (1) it is an acknowledgement frame for the last transmitted frame;
+        # (2) a data frame with an identifier (ID) different from that of the last received frame;
+        # (3) a retransmission of the last received frame;
+        # (4) or a reset frame.
+
+        if(not NetworkInterface.is_checksum_valid(frame)): return False
+        _,_,id,flag,_ = NetworkInterface.unpack_dccnet_frame(frame)
+
+        if((flag == ACK) and (id == self.id)):  return True
+        if((flag == RST) and (id == RST_ID)):   return True
+        if((flag != ACK) and (id != self.id)):  return True
+        if(self.last_received_frame == frame):  return True
+
+        return False
+
+    @staticmethod
+    def is_checksum_valid(frame):
+        cs,length,id,flags,data = NetworkInterface.unpack_dccnet_frame(frame)
+        
+        format_string = f"{HEADER_FORMAT} {str(length) + 's'}"
+        frame = struct.pack(format_string, SYNC, SYNC, 0, length, id, flags,data)
+
+        return cs == checksum(frame)
