@@ -34,10 +34,9 @@ class Socket:
     def connect(self):
         self.socket.connect((self.host, self.port))
     
-    def send(self,packet,n_bytes = 4096):
+    def send(self,packet):
         try:
             self.socket.sendto(packet, (self.host, self.port))
-            return self.receive(n_bytes)
 
         except socket.error as e: 
             print ("Socket error: %s" %str(e)) 

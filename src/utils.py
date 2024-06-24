@@ -2,8 +2,7 @@
 SYNC = 0xDCC023C2
 
 
-ID_POSITION     = 14
-FLAG_POSITION   = 15
+FLAG_POSITION   = 14
 HEADER_SIZE     = 15
 HEADER_FORMAT   = '!I I H H H B'
 
@@ -31,3 +30,5 @@ def checksum(data):
         # One's complement
         cs = ~cs & 0xffff
         return cs
+
+create_format_string = lambda length: f"{HEADER_FORMAT} {str(length) + 's'}"

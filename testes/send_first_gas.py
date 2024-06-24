@@ -6,7 +6,6 @@ args = sys.argv
 host,port,gas = args[1:]
 c = Client(host,int(port))
 
-response = c.transmit(gas)
-
-cs,length,id,flags,data = c.unpack_dccnet_frame(response)
-print(flags)
+response = c.enqueue(gas)
+c.run()
+a = 10
