@@ -15,6 +15,7 @@ class NetworkInterface:
         self.process = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
         self.id   = 0
+        self.last_id = 1
 
         self.condition = threading.Condition()
         self.queue = []
@@ -26,6 +27,8 @@ class NetworkInterface:
         if(not self.queue): return
 
         frame   = self.queue[0]
+        frame = Frame.change_id(frame,self.id)
+        # print(self.id,to_bytes(self.id))
         print("Enviado: ", Frame.unpack_dccnet_frame(frame))
         self.socket.send(frame)
         return frame
@@ -38,6 +41,7 @@ class NetworkInterface:
                 if(not self.running): break
 
                 frame   = self.queue[0]
+                
                 print("Enviado: ", Frame.unpack_dccnet_frame(frame))
                 self.socket.send(frame)
                 # self.condition.wait()
@@ -47,35 +51,34 @@ class NetworkInterface:
     def receive_lazy(self):
         if(not self.running): return
 
-        header  = self.socket.receive(HEADER_SIZE)
-        cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
-        data    = self.socket.receive(length)
+        try:
+            response = self.receive_frame()
+            self.treat_response(response)
 
-        format_string = create_format_string(length)
-        response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
-        self.treat_response(response)
+        except socket.error as e:
+            self.send_ack(self.last_received_frame)
+            return
 
-        self.last_received_frame = response
         return response
 
 
-    def receive(self):
-        time.sleep(1)
-        while self.running:
-            with self.condition:
-                header  = self.socket.receive(HEADER_SIZE)
-                cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
-                data    = self.socket.receive(length)
+    # def receive(self):
+    #     time.sleep(1)
+    #     while self.running:
+    #         with self.condition:
+    #             header  = self.socket.receive(HEADER_SIZE)
+    #             cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
+    #             data    = self.socket.receive(length)
 
-                format_string = create_format_string(length)
-                response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
-                self.treat_response(response)
+    #             format_string = create_format_string(length)
+    #             response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
+    #             self.treat_response(response)
 
-                self.last_received_frame = response
-                self.condition.notify()
-            time.sleep(0.5)
-        return response
-            # return self.treat_response(response)
+    #             self.last_received_frame = response
+    #             self.condition.notify()
+    #         time.sleep(0.5)
+    #     return response
+    #         # return self.treat_response(response)
 
     def treat_response(self,response):
         print()
@@ -90,10 +93,30 @@ class NetworkInterface:
         
         if(self.must_send_ack(response)):
             self.send_ack(response)
+            self.last_received_frame = response
+            self.last_id = Frame.get_id(response)
             return self.enqueue(self.process(response))
 
         if(Frame.get_flag(response) == RST):
             return self.terminate()
+        
+    def receive_frame(self):
+        try:
+            while True:
+                sync  = self.socket.receive(SYNC_SIZE)
+                print(sync,SYNCRONIZED)
+                if(sync==SYNCRONIZED): break
+            header  = self.socket.receive(HEADER_SIZE-SYNC_SIZE)
+            cs,length,id,flag = struct.unpack('!H H H B',header)
+            data    = self.socket.receive(length)
+
+            format_string = create_format_string(length)
+            response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
+            return response
+
+        except socket.error as e:
+            self.send_ack(self.last_received_frame)
+            return
 
     
     def must_send_ack(self,response):
@@ -132,7 +155,7 @@ class NetworkInterface:
         if((flag == RST) and (id == RST_ID)):   
             return True
         # (2) a data frame with an identifier (ID) different from that of the last received frame;
-        if((flag != ACK) and (id != self.id)):  
+        if((flag != ACK) and (id != self.last_id)):  
             return True
         # (3) a retransmission of the last received frame;
         if(self.last_received_frame == frame):  
@@ -152,7 +175,7 @@ class NetworkInterface:
         id = Frame.get_id(response)
         if(self.queue):
             if Frame.get_id(self.queue[0]) == id:
-                return self.queue.pop()   
+                return self.queue.pop(0)   
         return None
         
     def terminate(self):
@@ -162,14 +185,14 @@ class NetworkInterface:
             self.condition.notify_all()
 
     def run(self):
-        # while(self.running):
-        #     self.transmit_lazy()
-        #     self.receive_lazy()
-        transmit_thread = threading.Thread(target=self.transmit)
-        receive_thread  = threading.Thread(target=self.receive)
+        while(self.running):
+            self.transmit_lazy()
+            self.receive_lazy()
+        # transmit_thread = threading.Thread(target=self.transmit)
+        # receive_thread  = threading.Thread(target=self.receive)
 
-        transmit_thread.start()
-        receive_thread.start()
+        # transmit_thread.start()
+        # receive_thread.start()
 
-        transmit_thread.join()
-        receive_thread.join()
+        # transmit_thread.join()
+        # receive_thread.join()

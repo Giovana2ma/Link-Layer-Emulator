@@ -48,6 +48,7 @@ class Frame:
 
         return cs,length,id,flag,data
     
+    
     @staticmethod
     def is_checksum_valid(frame):
         cs,length,id,flag,data = Frame.unpack_dccnet_frame(frame)
@@ -61,6 +62,12 @@ class Frame:
     def get_id(frame):
         cs,length,id,flag,data = Frame.unpack_dccnet_frame(frame)
         return id
+    
+    @staticmethod
+    def change_id(frame,id):
+        _,_,_,flag,data = Frame.unpack_dccnet_frame(frame)
+
+        return Frame.create_dccnet_frame(data,id=id,flag=flag)
     
     @staticmethod
     def get_flag(frame):

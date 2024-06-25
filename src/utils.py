@@ -1,9 +1,12 @@
+import struct
 
 SYNC = 0xDCC023C2
+SYNCRONIZED = struct.pack("!I I",SYNC,SYNC)
 
 
 FLAG_POSITION   = 14
 HEADER_SIZE     = 15
+SYNC_SIZE       = 8
 HEADER_FORMAT   = '!I I H H H B'
 
 ACK = 0x80

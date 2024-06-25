@@ -29,6 +29,7 @@ class Socket:
     def create_socket(self):
         # Create a TCP socket
         self.socket = socket.socket(self.determine_ip_type(self.host), socket.SOCK_STREAM)
+        self.socket.settimeout(1)
         return self.socket
     
     def connect(self):
@@ -46,10 +47,11 @@ class Socket:
 
     def receive(self,n_bytes = 4096):
         try:
-            response,addr = self.socket.recvfrom(n_bytes)
+            response = self.socket.recv(n_bytes)
             return response
         except socket.error as e: 
             print ("Socket error: %s" %str(e)) 
+            raise e
         except Exception as e: 
             print ("Other exception: %s" %str(e)) 
 
