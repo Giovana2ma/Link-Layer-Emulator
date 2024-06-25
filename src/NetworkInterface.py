@@ -45,8 +45,7 @@ class NetworkInterface:
             return
         
         if(self.must_send_ack(response)):
-            self.send_ack(response)
-            return self.enqueue(self.process(response))
+            return self.send_ack(response)
         
         if(Frame.get_flag(response) == ACK):
             return self.dequeue(response)
@@ -69,8 +68,9 @@ class NetworkInterface:
         return True
     
     def send_ack(self,response):
-        self.id +=1
-        return self.enqueue("",flags=ACK)
+        id = Frame.get_id(response)
+        frame = Frame.create_dccnet_frame("",id,ACK)
+        self.socket.send(frame) 
 
 
     def is_acceptable(self,frame):
@@ -108,8 +108,10 @@ class NetworkInterface:
         cs,length,id,flag,data = Frame.unpack_dccnet_frame(response)
         with self.condition:
             reqs = [req for req in self.queue if Frame.get_id(req) == id]
-            self.queue.discard(reqs[0])
-        return reqs[0]    
+            if reqs:
+                self.queue.discard(reqs[0])
+                return reqs[0]    
+            return None
     
     def terminate(self):
         self.queue = []
