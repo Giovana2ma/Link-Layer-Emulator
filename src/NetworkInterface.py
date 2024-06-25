@@ -115,8 +115,9 @@ class NetworkInterface:
     def enqueue(self,data,flag = 0):
         frame   = Frame.create_dccnet_frame(data + "\n",id=self.id,flag=flag)
         with self.condition:
-            self.queue.append(frame)
-            self.condition.notify()
+            if frame not in self.queue:
+                self.queue.append(frame)
+                self.condition.notify()
         return frame
     
     def dequeue(self,response):
