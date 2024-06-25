@@ -22,7 +22,7 @@ class Frame:
         """
         
         # Firstly, encode the data as bytes 
-        data_encoded = bytes(data + "\n", encoding="ascii")
+        data_encoded = bytes(data, encoding="ascii")
         length = len(data_encoded)
 
         # The packet format depends on data

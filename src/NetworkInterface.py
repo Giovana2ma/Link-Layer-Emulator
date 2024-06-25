@@ -1,53 +1,67 @@
 import struct
 import threading
+import hashlib
+import time
 
 from socket_t   import *
 from utils      import *
 from DCCNET_frame import *
 
+
 class NetworkInterface:
     def __init__(self,host,port):
         self.socket = Socket(host,port)
 
-        self.process = lambda x: x
+        self.process = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
         self.id   = 0
 
         self.condition = threading.Condition()
-        self.queue = set()
+        self.queue = []
         self.running = True
     
     def transmit(self):
         while self.running:
             with self.condition:
-                while not self.queue:
+                while (not self.queue) and (self.running):
                     self.condition.wait()
+                if(not self.running): break
 
-                frame   = list(self.queue)[0]
+                frame   = self.queue[0]
+                print("Enviado: ", Frame.unpack_dccnet_frame(frame))
                 self.socket.send(frame)
+
+            time.sleep(2)
         return frame
     
     def receive(self):
         while self.running:
-            header  = self.socket.receive(HEADER_SIZE)
-            cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
-            data    = self.socket.receive(length)
+            time.sleep(1)
+            with self.condition:
+                header  = self.socket.receive(HEADER_SIZE)
+                cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
+                data    = self.socket.receive(length)
 
-            format_string = create_format_string(length)
-            response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
-            self.treat_response(response)
-        
+                format_string = create_format_string(length)
+                response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
+                self.treat_response(response)
+            time.sleep(1)
         return response
             # return self.treat_response(response)
 
     def treat_response(self,response):
+        print()
+        print("Recebido: ", Frame.unpack_dccnet_frame(response))
+
         if(not self.is_acceptable(response)): 
-            return
+            return response
         
         if(self.must_send_ack(response)):
-            return self.send_ack(response)
-        
+            self.send_ack(response)
+            return self.enqueue(self.process(response))
+
         if(Frame.get_flag(response) == ACK):
+            self.id = int(not self.id)
             return self.dequeue(response)
 
         if(Frame.get_flag(response) == RST):
@@ -70,7 +84,8 @@ class NetworkInterface:
     def send_ack(self,response):
         id = Frame.get_id(response)
         frame = Frame.create_dccnet_frame("",id,ACK)
-        self.socket.send(frame) 
+        print("ACK E: ", Frame.unpack_dccnet_frame(frame))
+        self.socket.send(frame)
 
 
     def is_acceptable(self,frame):
@@ -98,24 +113,24 @@ class NetworkInterface:
     
 
     def enqueue(self,data,flag = 0):
-        frame   = Frame.create_dccnet_frame(data,id=self.id,flag=flag)
+        frame   = Frame.create_dccnet_frame(data + "\n",id=self.id,flag=flag)
         with self.condition:
-            self.queue.add(frame)
+            self.queue.append(frame)
             self.condition.notify()
         return frame
     
     def dequeue(self,response):
-        cs,length,id,flag,data = Frame.unpack_dccnet_frame(response)
-        with self.condition:
-            reqs = [req for req in self.queue if Frame.get_id(req) == id]
-            if reqs:
-                self.queue.discard(reqs[0])
-                return reqs[0]    
-            return None
-    
+        id = Frame.get_id(response)
+        if(self.queue):
+            if Frame.get_id(self.queue[0]) == id:
+                return self.queue.pop()   
+        return None
+        
     def terminate(self):
-        self.queue = []
-        self.running = False
+        with self.condition:
+            self.queue = []
+            self.running = False
+            self.condition.notify_all()
 
     def run(self):
         transmit_thread = threading.Thread(target=self.transmit)
