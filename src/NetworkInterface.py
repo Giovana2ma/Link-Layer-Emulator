@@ -19,6 +19,16 @@ class NetworkInterface:
         self.condition = threading.Condition()
         self.queue = []
         self.running = True
+
+    
+    def transmit_lazy(self):
+        if(not self.running): return
+        if(not self.queue): return
+
+        frame   = self.queue[0]
+        print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+        self.socket.send(frame)
+        return frame
     
     def transmit(self):
         while self.running:
@@ -30,13 +40,28 @@ class NetworkInterface:
                 frame   = self.queue[0]
                 print("Enviado: ", Frame.unpack_dccnet_frame(frame))
                 self.socket.send(frame)
-
-            time.sleep(2)
+                # self.condition.wait()
+            
         return frame
     
+    def receive_lazy(self):
+        if(not self.running): return
+
+        header  = self.socket.receive(HEADER_SIZE)
+        cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
+        data    = self.socket.receive(length)
+
+        format_string = create_format_string(length)
+        response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
+        self.treat_response(response)
+
+        self.last_received_frame = response
+        return response
+
+
     def receive(self):
+        time.sleep(1)
         while self.running:
-            time.sleep(1)
             with self.condition:
                 header  = self.socket.receive(HEADER_SIZE)
                 cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
@@ -45,7 +70,10 @@ class NetworkInterface:
                 format_string = create_format_string(length)
                 response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
                 self.treat_response(response)
-            time.sleep(1)
+
+                self.last_received_frame = response
+                self.condition.notify()
+            time.sleep(0.5)
         return response
             # return self.treat_response(response)
 
@@ -55,14 +83,14 @@ class NetworkInterface:
 
         if(not self.is_acceptable(response)): 
             return response
+
+        if(Frame.get_flag(response) == ACK):
+            self.id ^= 1
+            return self.dequeue(response)
         
         if(self.must_send_ack(response)):
             self.send_ack(response)
             return self.enqueue(self.process(response))
-
-        if(Frame.get_flag(response) == ACK):
-            self.id = int(not self.id)
-            return self.dequeue(response)
 
         if(Frame.get_flag(response) == RST):
             return self.terminate()
@@ -134,6 +162,9 @@ class NetworkInterface:
             self.condition.notify_all()
 
     def run(self):
+        # while(self.running):
+        #     self.transmit_lazy()
+        #     self.receive_lazy()
         transmit_thread = threading.Thread(target=self.transmit)
         receive_thread  = threading.Thread(target=self.receive)
 
