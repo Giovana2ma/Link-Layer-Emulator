@@ -14,8 +14,11 @@ class NetworkInterface:
 
         self.process = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
-        self.id   = 0
-        self.last_id = 1
+        self.id   = 0 #last received ack id
+        self.send_id = 0 #last sended id                                           
+        self.last_id = 1 #last receveid data id
+
+        self.curr = ''
 
         self.condition = threading.Condition()
         self.queue = []
@@ -27,32 +30,32 @@ class NetworkInterface:
         if(not self.queue): return
 
         frame   = self.queue[0]
-        frame = Frame.change_id(frame,self.id)
-        # print(self.id,to_bytes(self.id))
         print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+
         self.socket.send(frame)
         return frame
     
-    def transmit(self):
-        while self.running:
-            with self.condition:
-                while (not self.queue) and (self.running):
-                    self.condition.wait()
-                if(not self.running): break
+    # def transmit(self):
+    #     while self.running:
+    #         with self.condition:
+    #             while (not self.queue) and (self.running):
+    #                 self.condition.wait()
+    #             if(not self.running): break
 
-                frame   = self.queue[0]
+    #             frame   = self.queue[0]
                 
-                print("Enviado: ", Frame.unpack_dccnet_frame(frame))
-                self.socket.send(frame)
-                # self.condition.wait()
+    #             print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+    #             self.socket.send(frame)
+    #             # self.condition.wait()
             
-        return frame
+    #     return frame
     
     def receive_lazy(self):
         if(not self.running): return
 
         try:
             response = self.receive_frame()
+            if(not response): return
             self.treat_response(response)
 
         except socket.error as e:
@@ -95,16 +98,19 @@ class NetworkInterface:
             self.send_ack(response)
             self.last_received_frame = response
             self.last_id = Frame.get_id(response)
-            return self.enqueue(self.process(response))
+            return self.md5(response)
 
         if(Frame.get_flag(response) == RST):
+            return self.terminate()
+        
+        if(Frame.get_flag(response) == END):
             return self.terminate()
         
     def receive_frame(self):
         try:
             while True:
                 sync  = self.socket.receive(SYNC_SIZE)
-                print(sync,SYNCRONIZED)
+                # print(sync,SYNCRONIZED)
                 if(sync==SYNCRONIZED): break
             header  = self.socket.receive(HEADER_SIZE-SYNC_SIZE)
             cs,length,id,flag = struct.unpack('!H H H B',header)
@@ -130,6 +136,8 @@ class NetworkInterface:
             return False
         if(Frame.get_flag(response) == RST): 
             return False
+        if(Frame.get_flag(response) == END): 
+            return False
         return True
     
     def send_ack(self,response):
@@ -154,6 +162,8 @@ class NetworkInterface:
         # (4) or a reset frame.
         if((flag == RST) and (id == RST_ID)):   
             return True
+        if((flag == END)):
+            return True
         # (2) a data frame with an identifier (ID) different from that of the last received frame;
         if((flag != ACK) and (id != self.last_id)):  
             return True
@@ -164,7 +174,9 @@ class NetworkInterface:
     
 
     def enqueue(self,data,flag = 0):
-        frame   = Frame.create_dccnet_frame(data + "\n",id=self.id,flag=flag)
+        frame   = Frame.create_dccnet_frame(data + "\n",id=self.send_id,flag=flag)
+        self.send_id ^= 1
+
         with self.condition:
             if frame not in self.queue:
                 self.queue.append(frame)
@@ -177,6 +189,31 @@ class NetworkInterface:
             if Frame.get_id(self.queue[0]) == id:
                 return self.queue.pop(0)   
         return None
+    
+    def find_message(self,response):
+        send_md5 = []
+        _,_,_,flg,data = Frame.unpack_dccnet_frame(response)
+        self.curr += data
+        lines = self.curr.split('\n')
+
+        for i in range (len(lines)-2):
+            send_md5.append(lines[i])
+        
+        if(data[-1]=='\n'):
+            send_md5.append(lines[-2])
+
+        self.curr = lines[-1]
+
+        return send_md5
+    
+    def md5(self,frame):
+        send_md5 = self.find_message(frame)
+        for message in send_md5:
+            self.enqueue(hashlib.md5(message.encode('ascii')).hexdigest())
+        return 
+
+
+
         
     def terminate(self):
         with self.condition:
