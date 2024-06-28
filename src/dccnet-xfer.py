@@ -1,4 +1,5 @@
 import sys
+from functools import partial
 from NetworkInterface import *
 
 
@@ -10,20 +11,35 @@ def read_file_in_chunks(input_file, chunk_size=4096):
                 break
             yield chunk
 
+def write_on_file(line,output_file=""):
+    # print(line)
+    with open(output_file,"a") as file:
+        file.write(line + "\n")
+    return None
+
 
 def server_mode(port, input_file, output_file):
+    open(output_file, "w").close()
+
     host = "127.0.0.1"
     c = NetworkInterface(host,port,socket_type="server")
-    c.process_line = lambda x: None
+
+    helper = partial(write_on_file,output_file=output_file)
+    c.process_line = helper
     
     for m in read_file_in_chunks(input_file):
         c.enqueue(str(m))
+    c.enqueue("",flag=END)
     c.listen()
 
 
 def client_mode(host, port, input_file, output_file):
+    open(output_file, "w").close()
+    
     c = NetworkInterface(host,port,socket_type="client")
-    c.process_line = lambda x: None
+
+    helper = partial(write_on_file,output_file=output_file)
+    c.process_line = helper
 
     for m in read_file_in_chunks(input_file):
         c.enqueue(str(m))

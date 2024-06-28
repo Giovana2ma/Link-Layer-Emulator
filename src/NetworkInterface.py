@@ -23,6 +23,7 @@ class NetworkInterface:
 
         self.process_line = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
+        self.recv_end = False
         self.id   = 0       #last received ack id
         self.send_id = 0    #last sended id                                           
         self.last_id = 1    #last receveid data id
@@ -38,13 +39,16 @@ class NetworkInterface:
         In order to send frames to the server, the frames must first be enqueued. The queue is like a buffer that contains all
         frames that haven´t been acknowledged by it's pairs. The first frame is always enqueue before run() is called
         """
-        if(not self.running): return
-        if(not self.queue): return
 
-        with self.cond:
-            frame   = self.queue[0]
-            self.socket.send(frame)
-            print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+        while(self.running):
+            with self.cond:
+                while(not self.queue and self.running): self.cond.wait()
+                if(not self.running): return
+
+                frame   = self.queue[0]
+                self.socket.send(frame)
+                # print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+            time.sleep(0.1)
         return frame
     
     def receive(self):
@@ -53,28 +57,28 @@ class NetworkInterface:
         The receiver only process frames that are acceptable. 
         """
         if(not self.running): return
+        while(self.running):
+            try:
+                if(self.recv_end and not self.queue): 
+                    self.terminate()
+                    break
+                response = self.detect_frame()
 
-        try:
-            response = self.detect_frame()
+                # Some times, the corrupted frames can´t be processed, being discarded
+                if(not response): continue
+                self.treat_response(response)
 
-            # Some times, the corrupted frames can´t be processed, being discarded
-            if(not response): return
-            self.treat_response(response)
-
-        except socket.error as e: 
-            # This error only triggers if the servers times out and don´t respond the last sended message
-            self.send_ack(self.last_received_frame)
-            return
-
-        return response
-
+            except socket.error as e: 
+                # This error only triggers if the servers times out and don´t respond the last sended message
+                self.send_ack(self.last_received_frame)
+            
     def treat_response(self,response):
         """
         Once the response is listened by the receiver, it takes different paths depending on what type of frame the response is
         All treated responses are valid responses
         """
 
-        print("Recebido ", Frame.unpack_dccnet_frame(response))
+        # print("Recebido ", Frame.unpack_dccnet_frame(response))
 
         if(not self.is_acceptable(response)):  return response
 
@@ -87,20 +91,28 @@ class NetworkInterface:
         if(self.is_data_frame(response)):
             self.send_ack(response)
             # Control variables for retransmition and error detection
-            self.last_received_frame = response
-            self.last_id = Frame.get_id(response)
+            
             # Since frames do not necessarily have a single line, 
             # we have to handle boundary cases
             # self.process_line() generate the expected output for every inpuy
-            for m in self.break_in_lines(response):
-                self.enqueue(self.process_line(m))
+            if(Frame.get_id(response) != self.last_id):
+                for m in self.break_in_lines(response):
+                    self.enqueue(self.process_line(m))
+
+            self.last_received_frame = response
+            self.last_id = Frame.get_id(response)
             return self.queue
 
 
         # RST and END frames are processed to stop the execution
-        if(Frame.get_flag(response) in [RST,END]):
+        if(Frame.get_flag(response) == RST):
             self.send_ack(response)
             return self.terminate()
+        if(Frame.get_flag(response) == END):
+            self.send_ack(response)
+            self.recv_end = True 
+            return 
+        
         
     def detect_frame(self):
         """
@@ -148,7 +160,7 @@ class NetworkInterface:
     def send_ack(self,response):
         id = Frame.get_id(response)
         frame = Frame.create_dccnet_frame("",id,ACK)
-        print("ACK E: ", Frame.unpack_dccnet_frame(frame))
+        # print("ACK E: ", Frame.unpack_dccnet_frame(frame))
         self.socket.send(frame)
 
 
@@ -191,6 +203,7 @@ class NetworkInterface:
             if frame not in self.queue:
                 self.queue.append(frame)
                 self.send_id ^= 1
+                self.cond.notify()
         return frame
     
     def dequeue(self,response):
@@ -223,18 +236,16 @@ class NetworkInterface:
         with self.cond:
             self.queue = []
             self.running = False
+            self.cond.notify()
 
     def run(self):
-        while(self.running):
-            receiver_t   = threading.Thread(target=self.receive)
-            transmiter_t = threading.Thread(target=self.transmit)
-            transmiter_t.start()
-            receiver_t.start()
-            transmiter_t.join()
-            receiver_t.join()
+        receiver_t   = threading.Thread(target=self.receive)
+        transmiter_t = threading.Thread(target=self.transmit)
+        transmiter_t.start()
+        receiver_t.start()
+        transmiter_t.join()
+        receiver_t.join()
 
-        self.running = True
-        self.queue = []
     
     def listen(self):
         while self.running:
@@ -242,7 +253,7 @@ class NetworkInterface:
                 # --- accept client ---
                 # print('[DEBUG] accept ... waiting')
                 conn, addr = self.socket.socket.accept() # socket, address
-                print('[DEBUG] connected!',addr)
+                # print('[DEBUG] connected!',addr)
                 self.socket.socket = conn
                 self.run()
             except socket.error as e: 
