@@ -28,6 +28,7 @@ class NetworkInterface:
         self.last_id = 1    #last receveid data id
 
         self.curr = ''
+        self.cond = threading.Condition()
 
         self.queue = []
         self.running = True
@@ -40,10 +41,10 @@ class NetworkInterface:
         if(not self.running): return
         if(not self.queue): return
 
-        frame   = self.queue[0]
-        self.socket.send(frame)
-
-        print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+        with self.cond:
+            frame   = self.queue[0]
+            self.socket.send(frame)
+            print("Enviado: ", Frame.unpack_dccnet_frame(frame))
         return frame
     
     def receive(self):
@@ -186,9 +187,10 @@ class NetworkInterface:
         """
         if(data == None): return None
         frame   = Frame.create_dccnet_frame(data,id=self.send_id,flag=flag)
-        if frame not in self.queue:
-            self.queue.append(frame)
-            self.send_id ^= 1
+        with self.cond:
+            if frame not in self.queue:
+                self.queue.append(frame)
+                self.send_id ^= 1
         return frame
     
     def dequeue(self,response):
@@ -199,8 +201,9 @@ class NetworkInterface:
         The valid ACK only applies to the top of the queue
         """
         if(not self.queue): return None
-        if Frame.get_id(self.queue[0]) == Frame.get_id(response):
-            return self.queue.pop(0)   
+        with self.cond:
+            if Frame.get_id(self.queue[0]) == Frame.get_id(response):
+                return self.queue.pop(0)   
         return None
     
     def break_in_lines(self,response):
@@ -217,13 +220,18 @@ class NetworkInterface:
         return messages
 
     def terminate(self):
-        self.queue = []
-        self.running = False
+        with self.cond:
+            self.queue = []
+            self.running = False
 
     def run(self):
         while(self.running):
-            self.transmit()
-            self.receive()
+            receiver_t   = threading.Thread(target=self.receive)
+            transmiter_t = threading.Thread(target=self.transmit)
+            transmiter_t.start()
+            receiver_t.start()
+            transmiter_t.join()
+            receiver_t.join()
 
         self.running = True
         self.queue = []
