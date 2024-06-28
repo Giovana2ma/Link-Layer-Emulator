@@ -1,5 +1,5 @@
 import struct
-from utils      import *
+from utils.utils import *
 
 
 class Frame:

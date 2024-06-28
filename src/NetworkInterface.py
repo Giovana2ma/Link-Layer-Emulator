@@ -3,9 +3,9 @@ import threading
 import hashlib
 import time
 
-from socket_t   import *
-from utils      import *
-from DCCNET_frame import *
+from utils.socket_t     import *
+from utils.utils        import *
+from utils.DCCNET_frame import *
 
 
 class NetworkInterface:
@@ -18,8 +18,8 @@ class NetworkInterface:
 
     The main function of this class is run(), that sends packets to the server until a RST, a END or a Error occurs
     """
-    def __init__(self,host,port):
-        self.socket = Socket(host,port)
+    def __init__(self,host,port,socket_type="client"):
+        self.socket = Socket(host,port,socket_type)
 
         self.process_line = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
@@ -43,7 +43,7 @@ class NetworkInterface:
         frame   = self.queue[0]
         self.socket.send(frame)
 
-        # print("Enviado: ", Frame.unpack_dccnet_frame(frame))
+        print("Enviado: ", Frame.unpack_dccnet_frame(frame))
         return frame
     
     def receive(self):
@@ -72,6 +72,9 @@ class NetworkInterface:
         Once the response is listened by the receiver, it takes different paths depending on what type of frame the response is
         All treated responses are valid responses
         """
+
+        print("Recebido ", Frame.unpack_dccnet_frame(response))
+
         if(not self.is_acceptable(response)):  return response
 
         # Valid ACK frames change the current id
@@ -95,6 +98,7 @@ class NetworkInterface:
 
         # RST and END frames are processed to stop the execution
         if(Frame.get_flag(response) in [RST,END]):
+            self.send_ack(response)
             return self.terminate()
         
     def detect_frame(self):
@@ -123,7 +127,7 @@ class NetworkInterface:
             return response
 
         except socket.error as e:
-            self.send_ack(self.last_received_frame)
+            # self.send_ack(self.last_received_frame)
             return
 
     def is_data_frame(self,response):
@@ -143,7 +147,7 @@ class NetworkInterface:
     def send_ack(self,response):
         id = Frame.get_id(response)
         frame = Frame.create_dccnet_frame("",id,ACK)
-        # print("ACK E: ", Frame.unpack_dccnet_frame(frame))
+        print("ACK E: ", Frame.unpack_dccnet_frame(frame))
         self.socket.send(frame)
 
 
@@ -180,7 +184,8 @@ class NetworkInterface:
         The queue is maintened to transmit the packets in the right order
         There is no limit on how many packets the queue can handle
         """
-        frame   = Frame.create_dccnet_frame(data + "\n",id=self.send_id,flag=flag)
+        if(data == None): return None
+        frame   = Frame.create_dccnet_frame(data,id=self.send_id,flag=flag)
         if frame not in self.queue:
             self.queue.append(frame)
             self.send_id ^= 1
@@ -222,3 +227,15 @@ class NetworkInterface:
 
         self.running = True
         self.queue = []
+    
+    def listen(self):
+        while self.running:
+            try:
+                # --- accept client ---
+                # print('[DEBUG] accept ... waiting')
+                conn, addr = self.socket.socket.accept() # socket, address
+                print('[DEBUG] connected!',addr)
+                self.socket.socket = conn
+                self.run()
+            except socket.error as e: 
+                continue

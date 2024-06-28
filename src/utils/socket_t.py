@@ -2,11 +2,17 @@ import socket
 
 class Socket:
     """ Class that implements the socket communication with builtin stop and wait."""
-    def __init__(self, host, port):
+    def __init__(self, host, port,socket_type = "client"):
         self.host = host
         self.port = port
         self.socket = self.create_socket()
-        self.connect()
+        if(socket_type == "client"):
+            self.connect()
+        else:
+            self.socket.settimeout(10)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind((host,port))
+            self.socket.listen(1)
 
     def determine_ip_type(self,hostname):
         ip_address = socket.getaddrinfo(hostname, None)[0][4][0]
