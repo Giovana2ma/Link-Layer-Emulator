@@ -9,114 +9,116 @@ from DCCNET_frame import *
 
 
 class NetworkInterface:
+    """
+    This class is responsible for the concrete implementation of the DCCNET link layer protocol.
+    This emulator handle framing, sequencing, error detection and data retransmission.
+
+    In order to used it, the user most provide the (host,port) pair of the desired server
+    In addition to change the function self.process, in order to process the lines in a desired way 
+
+    The main function of this class is run(), that sends packets to the server until a RST, a END or a Error occurs
+    """
     def __init__(self,host,port):
         self.socket = Socket(host,port)
 
-        self.process = lambda x: Frame.unpack_dccnet_frame(x)[4]
+        self.process_line = lambda x: Frame.unpack_dccnet_frame(x)[4]
         self.last_received_frame = None
-        self.id   = 0 #last received ack id
-        self.send_id = 0 #last sended id                                           
-        self.last_id = 1 #last receveid data id
+        self.id   = 0       #last received ack id
+        self.send_id = 0    #last sended id                                           
+        self.last_id = 1    #last receveid data id
 
         self.curr = ''
 
-        self.condition = threading.Condition()
         self.queue = []
         self.running = True
-
     
-    def transmit_lazy(self):
+    def transmit(self):
+        """
+        In order to send frames to the server, the frames must first be enqueued. The queue is like a buffer that contains all
+        frames that haven´t been acknowledged by it's pairs. The first frame is always enqueue before run() is called
+        """
         if(not self.running): return
         if(not self.queue): return
 
         frame   = self.queue[0]
-        print("Enviado: ", Frame.unpack_dccnet_frame(frame))
-
         self.socket.send(frame)
+
+        # print("Enviado: ", Frame.unpack_dccnet_frame(frame))
         return frame
     
-    # def transmit(self):
-    #     while self.running:
-    #         with self.condition:
-    #             while (not self.queue) and (self.running):
-    #                 self.condition.wait()
-    #             if(not self.running): break
-
-    #             frame   = self.queue[0]
-                
-    #             print("Enviado: ", Frame.unpack_dccnet_frame(frame))
-    #             self.socket.send(frame)
-    #             # self.condition.wait()
-            
-    #     return frame
-    
-    def receive_lazy(self):
+    def receive(self):
+        """
+        The receiver is reponsible for both listening and processing the lines received by the server.
+        The receiver only process frames that are acceptable. 
+        """
         if(not self.running): return
 
         try:
-            response = self.receive_frame()
+            response = self.detect_frame()
+
+            # Some times, the corrupted frames can´t be processed, being discarded
             if(not response): return
             self.treat_response(response)
 
-        except socket.error as e:
+        except socket.error as e: 
+            # This error only triggers if the servers times out and don´t respond the last sended message
             self.send_ack(self.last_received_frame)
             return
 
         return response
 
-
-    # def receive(self):
-    #     time.sleep(1)
-    #     while self.running:
-    #         with self.condition:
-    #             header  = self.socket.receive(HEADER_SIZE)
-    #             cs,length,id,flag,_ = Frame.unpack_dccnet_frame(header)
-    #             data    = self.socket.receive(length)
-
-    #             format_string = create_format_string(length)
-    #             response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
-    #             self.treat_response(response)
-
-    #             self.last_received_frame = response
-    #             self.condition.notify()
-    #         time.sleep(0.5)
-    #     return response
-    #         # return self.treat_response(response)
-
     def treat_response(self,response):
-        print()
-        print("Recebido: ", Frame.unpack_dccnet_frame(response))
+        """
+        Once the response is listened by the receiver, it takes different paths depending on what type of frame the response is
+        All treated responses are valid responses
+        """
+        if(not self.is_acceptable(response)):  return response
 
-        if(not self.is_acceptable(response)): 
-            return response
-
+        # Valid ACK frames change the current id
         if(Frame.get_flag(response) == ACK):
             self.id ^= 1
             return self.dequeue(response)
         
-        if(self.must_send_ack(response)):
+        # Data frames must the acknowledged and processed
+        if(self.is_data_frame(response)):
             self.send_ack(response)
+            # Control variables for retransmition and error detection
             self.last_received_frame = response
             self.last_id = Frame.get_id(response)
-            return self.md5(response)
+            # Since frames do not necessarily have a single line, 
+            # we have to handle boundary cases
+            # self.process_line() generate the expected output for every inpuy
+            for m in self.break_in_lines(response):
+                self.enqueue(self.process_line(m))
+            return self.queue
 
-        if(Frame.get_flag(response) == RST):
+
+        # RST and END frames are processed to stop the execution
+        if(Frame.get_flag(response) in [RST,END]):
             return self.terminate()
         
-        if(Frame.get_flag(response) == END):
-            return self.terminate()
-        
-    def receive_frame(self):
+    def detect_frame(self):
+        """
+        A DCCNET packet always starts with 
+        0   32  64
+        -------------------------
+        SYNC SYNC CS L ID F DATA
+        -------------------------
+
+        So, to synchonize the received frame, we must search for the double SYNC occurence
+        """
         try:
-            while True:
+            sync = 0x0
+            while (sync != SYNCRONIZED):
                 sync  = self.socket.receive(SYNC_SIZE)
-                # print(sync,SYNCRONIZED)
-                if(sync==SYNCRONIZED): break
+
             header  = self.socket.receive(HEADER_SIZE-SYNC_SIZE)
             cs,length,id,flag = struct.unpack('!H H H B',header)
+
             data    = self.socket.receive(length)
 
             format_string = create_format_string(length)
+
             response = struct.pack(format_string, SYNC, SYNC, cs, length, id, flag, data)
             return response
 
@@ -124,11 +126,9 @@ class NetworkInterface:
             self.send_ack(self.last_received_frame)
             return
 
-    
-    def must_send_ack(self,response):
-        #Upon accepting a data frame (cases 2 and), the receiver must respond with an acknowledgement frame.
+    def is_data_frame(self,response):
+        # Upon accepting a data frame (cases 2 and), the receiver must respond with an acknowledgement frame.
         # (2) a data frame with an identifier (ID) different from that of the last received frame;
-        # (3) a retransmission of the last received frame;
 
         if(not self.is_acceptable(response)): 
             return False
@@ -143,7 +143,7 @@ class NetworkInterface:
     def send_ack(self,response):
         id = Frame.get_id(response)
         frame = Frame.create_dccnet_frame("",id,ACK)
-        print("ACK E: ", Frame.unpack_dccnet_frame(frame))
+        # print("ACK E: ", Frame.unpack_dccnet_frame(frame))
         self.socket.send(frame)
 
 
@@ -156,13 +156,14 @@ class NetworkInterface:
 
         cs,length,id,flag,data = Frame.unpack_dccnet_frame(frame)
 
+        # (5) Termination frame;
+        if((flag == END)):
+            return True
         # (1) it is an acknowledgement frame for the last transmitted frame;
         if((flag == ACK) and (id == self.id)):  
             return True
         # (4) or a reset frame.
         if((flag == RST) and (id == RST_ID)):   
-            return True
-        if((flag == END)):
             return True
         # (2) a data frame with an identifier (ID) different from that of the last received frame;
         if((flag != ACK) and (id != self.last_id)):  
@@ -174,62 +175,50 @@ class NetworkInterface:
     
 
     def enqueue(self,data,flag = 0):
+        """
+        All sended packets must pass by this function
+        The queue is maintened to transmit the packets in the right order
+        There is no limit on how many packets the queue can handle
+        """
         frame   = Frame.create_dccnet_frame(data + "\n",id=self.send_id,flag=flag)
-        self.send_id ^= 1
-
-        with self.condition:
-            if frame not in self.queue:
-                self.queue.append(frame)
-                self.condition.notify()
+        if frame not in self.queue:
+            self.queue.append(frame)
+            self.send_id ^= 1
         return frame
     
     def dequeue(self,response):
-        id = Frame.get_id(response)
-        if(self.queue):
-            if Frame.get_id(self.queue[0]) == id:
-                return self.queue.pop(0)   
+        """
+        Once a valid ACK is received, 
+        the corresponding frame must get out of the queue
+        
+        The valid ACK only applies to the top of the queue
+        """
+        if(not self.queue): return None
+        if Frame.get_id(self.queue[0]) == Frame.get_id(response):
+            return self.queue.pop(0)   
         return None
     
-    def find_message(self,response):
-        send_md5 = []
+    def break_in_lines(self,response):
+        messages = []
         _,_,_,flg,data = Frame.unpack_dccnet_frame(response)
+
         self.curr += data
         lines = self.curr.split('\n')
 
-        for i in range (len(lines)-2):
-            send_md5.append(lines[i])
+        for m in lines[:-1]:
+            messages.append(m)
         
-        if(data[-1]=='\n'):
-            send_md5.append(lines[-2])
-
         self.curr = lines[-1]
+        return messages
 
-        return send_md5
-    
-    def md5(self,frame):
-        send_md5 = self.find_message(frame)
-        for message in send_md5:
-            self.enqueue(hashlib.md5(message.encode('ascii')).hexdigest())
-        return 
-
-
-
-        
     def terminate(self):
-        with self.condition:
-            self.queue = []
-            self.running = False
-            self.condition.notify_all()
+        self.queue = []
+        self.running = False
 
     def run(self):
         while(self.running):
-            self.transmit_lazy()
-            self.receive_lazy()
-        # transmit_thread = threading.Thread(target=self.transmit)
-        # receive_thread  = threading.Thread(target=self.receive)
+            self.transmit()
+            self.receive()
 
-        # transmit_thread.start()
-        # receive_thread.start()
-
-        # transmit_thread.join()
-        # receive_thread.join()
+        self.running = True
+        self.queue = []

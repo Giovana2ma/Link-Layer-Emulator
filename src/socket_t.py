@@ -50,7 +50,7 @@ class Socket:
             response = self.socket.recv(n_bytes)
             return response
         except socket.error as e: 
-            print ("Socket error: %s" %str(e)) 
+            # print ("Socket error: %s" %str(e)) 
             raise e
         except Exception as e: 
             print ("Other exception: %s" %str(e)) 
