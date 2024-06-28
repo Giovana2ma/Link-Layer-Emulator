@@ -12,4 +12,3 @@ def md5(line):
 c.process_line = md5
 response = c.enqueue(gas)
 c.run()
-a = 10
