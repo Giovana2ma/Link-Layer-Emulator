@@ -1,6 +1,5 @@
 import struct
 import threading
-import hashlib
 import time
 
 from utils.socket_t     import *

@@ -12,7 +12,6 @@ def read_file_in_chunks(input_file, chunk_size=4096):
             yield chunk
 
 def write_on_file(line,output_file=""):
-    # print(line)
     with open(output_file,"a") as file:
         file.write(line + "\n")
     return None
@@ -30,7 +29,7 @@ def server_mode(port, input_file, output_file):
     for m in read_file_in_chunks(input_file):
         c.enqueue(str(m))
     c.enqueue("",flag=END)
-    c.listen()
+    return c.listen()
 
 
 def client_mode(host, port, input_file, output_file):
@@ -44,7 +43,7 @@ def client_mode(host, port, input_file, output_file):
     for m in read_file_in_chunks(input_file):
         c.enqueue(str(m))
     c.enqueue("",flag=END)
-    c.run()
+    return c.run()
 
 
 def main():
@@ -59,6 +58,8 @@ def main():
         print("Usage:")
         print("  Server mode: ./dccnet-xfer -s <PORT> <INPUT> <OUTPUT>")
         print("  Client mode: ./dccnet-xfer -c <IP>:<PORT> <INPUT> <OUTPUT>")
+    
+    return 0
 
 if __name__ == "__main__":
     main()
